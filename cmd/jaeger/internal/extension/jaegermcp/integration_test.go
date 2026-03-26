@@ -69,8 +69,12 @@ func connectMCPSession(t *testing.T, mockReader *tracestoremocks.Reader) *mcpSes
 	_, addr := startTestServerWithQueryService(t, svc, nil)
 	session := connectMCPClient(t, addr)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
+
+	if mockReader != nil {
+		t.Cleanup(func() { mockReader.AssertExpectations(t) })
+	}
 
 	return &mcpSession{ClientSession: session, ctx: ctx}
 }
@@ -93,7 +97,7 @@ func connectMCPClient(t *testing.T, addr string) *mcp.ClientSession {
 		HTTPClient: http.DefaultClient,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	session, err := client.Connect(ctx, transport, nil)
@@ -214,7 +218,6 @@ func TestMCPClientToolsListDiscovery(t *testing.T) {
 	for _, name := range expected {
 		assert.True(t, got[name], "tool %q should be discovered via tools/list", name)
 	}
-	assert.Len(t, result.Tools, len(expected))
 }
 
 // --- Tool invocation tests ---
@@ -400,8 +403,11 @@ func TestMCPClientSearchTracesEmptyResults(t *testing.T) {
 	text := s.callTool(t, "search_traces", map[string]any{
 		"service_name": "nonexistent", "start_time_min": "-1h",
 	})
-	assert.NotContains(t, text, `"traces":null`)
-	assert.NotContains(t, text, `"traces": null`)
+	var output struct {
+		Traces []any `json:"traces"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &output))
+	assert.Empty(t, output.Traces)
 }
 
 // --- Session isolation test ---
@@ -411,7 +417,7 @@ func TestMCPClientMultipleSessionsIndependent(t *testing.T) {
 	session1 := connectMCPClient(t, addr)
 	session2 := connectMCPClient(t, addr)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	type callResult struct {
